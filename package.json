@@ -14,7 +14,7 @@
     "pretty": "pretty-quick --staged",
     "typeCheck": "tsc --noEmit",
     "hook:precommit": "pnpm typeCheck && pnpm run lint && pnpm run pretty",
-    "hook:prepush": "vitest"
+    "hook:prepush": "vitest --no-watch"
   },
   "dependencies": {
     "@radix-ui/react-slot": "^1.1.1",
