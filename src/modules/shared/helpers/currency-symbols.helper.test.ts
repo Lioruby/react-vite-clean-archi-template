@@ -1,8 +1,9 @@
 import { getCurrencySymbol } from "./currency-symbols.helper";
+import { vi } from "vitest";
 
 describe("Get currency symbols", () => {
   beforeEach(() => {
-    jest.spyOn(console, "warn").mockImplementation();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   describe("Happy Path", () => {
@@ -61,7 +62,7 @@ describe("Get currency symbols", () => {
       expect(getCurrencySymbol("IAEJF")).toBe("IAEJF");
     });
     it("should put a warning in the console if the currency is not found", () => {
-      console.warn = jest.fn();
+      console.warn = vi.fn();
       getCurrencySymbol("IAEJF");
       expect(console.warn).toHaveBeenCalledWith(
         "Currency symbol not found for: IAEJF",

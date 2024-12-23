@@ -1,8 +1,9 @@
+import { vi } from "vitest";
 import { extractErrorMessage } from "./errors.utils";
 
 describe("extractErrorMessage", () => {
   beforeEach(() => {
-    jest.spyOn(console, "warn").mockImplementation();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
   });
 
   it("Should extract an error message when an error is thrown", () => {
