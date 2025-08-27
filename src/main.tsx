@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import "./index.css";
+import "./modules/global/react/index.css";
 import App from "./modules/global/react/App.tsx";
 import { AppWrapper } from "./modules/app/react/AppWrapper.tsx";
 
@@ -9,5 +9,5 @@ createRoot(document.getElementById("root")!).render(
     <AppWrapper>
       <App />
     </AppWrapper>
-  </StrictMode>,
+  </StrictMode>
 );
