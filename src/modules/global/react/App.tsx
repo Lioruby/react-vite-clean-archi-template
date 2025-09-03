@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { init } from "@airwallex/components-sdk";
 
 interface AirwallexPayments {
@@ -13,27 +13,30 @@ interface AirwallexPayments {
   }) => string | void;
 }
 
+interface PaymentIntent {
+  id: string;
+  client_secret: string;
+  status: string;
+}
+
 function App() {
   const [payments, setPayments] = useState<AirwallexPayments | null>(null);
   const [loading, setLoading] = useState(false);
-  const [customerId, setCustomerId] = useState<string | null>(null);
-  const [paymentIntentId, setPaymentIntentId] = useState<string | null>(null);
-  const [clientSecret, setClientSecret] = useState<string | null>(null);
-  const [step, setStep] = useState<
-    "create-customer" | "add-payment" | "completed"
-  >("create-customer");
-  const [subscriptionInfo, setSubscriptionInfo] = useState<any>(null);
+  const [paymentIntent, setPaymentIntent] = useState<PaymentIntent | null>(
+    null
+  );
+  const [paymentStatus, setPaymentStatus] = useState<
+    "idle" | "success" | "failed"
+  >("idle");
 
-  const createCustomerUrl =
-    "http://localhost:8000/airwallex/create-customer-for-subscription";
-  const completeSubscriptionUrl =
-    "http://localhost:8000/airwallex/complete-subscription-after-payment";
+  const createPaymentIntentUrl =
+    "http://localhost:8000/airwallex/create-payment-intent";
 
   useEffect(() => {
     const initializeAirwallex = async () => {
       try {
         const { payments } = await init({
-          env: "demo", // Utilisez 'prod' pour la production
+          env: "prod",
           enabledElements: ["payments"],
         });
         setPayments(payments as AirwallexPayments);
@@ -45,182 +48,95 @@ function App() {
     initializeAirwallex();
   }, []);
 
-  const handlePaymentMethodRedirect = useCallback(() => {
-    if (!payments || !paymentIntentId || !clientSecret) return;
+  // Check URL params for payment result
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const status = urlParams.get("status");
 
-    // Use Airwallex SDK to redirect to hosted payment page
-    payments.redirectToCheckout({
-      intent_id: paymentIntentId,
-      client_secret: clientSecret,
-      country_code: "FR",
-      currency: "EUR",
-      successUrl: `${window.location.origin}?payment_method=success&customer_id=${customerId}&payment_intent_id=${paymentIntentId}`,
-      failUrl: `${window.location.origin}?payment_method=failed&error=payment_failed`,
-      methods: ["card", "sepa_direct_debit"],
-    });
-  }, [payments, paymentIntentId, clientSecret, customerId]);
+    if (status === "success") {
+      setPaymentStatus("success");
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (status === "failed") {
+      setPaymentStatus("failed");
+      const error = urlParams.get("error");
+      if (error) {
+        console.error("Payment error:", error);
+      }
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
-  // Fonction pour créer automatiquement la subscription après paiement réussi
-  const completeSubscription = async (
-    customerId: string,
-    paymentIntentId: string
-  ) => {
-    console.log("🚀 Début création subscription:", {
-      customerId,
-      paymentIntentId,
-    });
+  const createPaymentIntent = async () => {
     setLoading(true);
+    setPaymentStatus("idle");
 
     try {
-      const response = await fetch(completeSubscriptionUrl, {
+      const response = await fetch(createPaymentIntentUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({
-          request: {
-            customer_id: customerId,
-            payment_intent_id: paymentIntentId,
-          },
-        }),
       });
 
       const data = await response.json();
-      console.log("📦 Réponse subscription:", data);
-
-      if (data.success) {
-        setSubscriptionInfo(data);
-        setStep("completed");
-        alert("🎉 Subscription créée avec succès !");
-      } else {
-        alert(`❌ Erreur: ${data.message}`);
-        console.error("Erreur subscription:", data);
-      }
+      console.log("Payment Intent créé:", data);
+      setPaymentIntent(data);
     } catch (error) {
-      console.error("❌ Erreur réseau:", error);
-      alert("Erreur lors de la finalisation de l'abonnement");
+      console.error("Erreur lors de la création du payment intent:", error);
+      alert("Erreur lors de la création du paiement");
     } finally {
       setLoading(false);
     }
   };
 
-  // Check URL params for success callback - DOIT S'EXECUTER AU CHARGEMENT
-  useEffect(() => {
-    console.log("🔍 Checking URL params...");
-    const urlParams = new URLSearchParams(window.location.search);
-    const paymentMethod = urlParams.get("payment_method");
-    const urlCustomerId = urlParams.get("customer_id");
-    const urlPaymentIntentId = urlParams.get("payment_intent_id");
+  const redirectToCheckout = () => {
+    if (!payments || !paymentIntent) return;
 
-    console.log("URL params:", {
-      paymentMethod,
-      urlCustomerId,
-      urlPaymentIntentId,
-      currentStep: step,
+    payments.redirectToCheckout({
+      intent_id: paymentIntent.id,
+      client_secret: paymentIntent.client_secret,
+      country_code: "FR",
+      currency: "EUR",
+      successUrl: `${window.location.origin}?status=success`,
+      failUrl: `${window.location.origin}?status=failed`,
+      methods: ["card", "sepa_direct_debit"],
     });
-
-    if (paymentMethod === "success" && urlCustomerId && urlPaymentIntentId) {
-      console.log(
-        "✅ Paiement détecté comme réussi ! Création de la subscription..."
-      );
-
-      // Mettre à jour les states
-      setCustomerId(urlCustomerId);
-      setPaymentIntentId(urlPaymentIntentId);
-
-      // Créer automatiquement la subscription
-      completeSubscription(urlCustomerId, urlPaymentIntentId);
-
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-    } else if (paymentMethod === "failed") {
-      const error = urlParams.get("error");
-      alert(`❌ Erreur lors du paiement: ${error}`);
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-  }, []); // Enlever la dépendance sur 'step' pour que ça s'exécute toujours
-
-  const createCustomer = async () => {
-    setLoading(true);
-
-    try {
-      const response = await fetch(createCustomerUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          request: {
-            first_name: "John",
-            last_name: "Doe",
-            email: "john.doe@example.com",
-            phone_number: "+33612345678",
-          },
-        }),
-      });
-
-      const data = await response.json();
-      console.log("Customer créé:", data);
-
-      if (data.customer_id && data.payment_intent_id && data.client_secret) {
-        setCustomerId(data.customer_id);
-        setPaymentIntentId(data.payment_intent_id);
-        setClientSecret(data.client_secret);
-        setStep("add-payment");
-      }
-    } catch (error) {
-      console.error("Erreur lors de la création du customer:", error);
-    } finally {
-      setLoading(false);
-    }
   };
 
   const resetFlow = () => {
-    setCustomerId(null);
-    setPaymentIntentId(null);
-    setClientSecret(null);
-    setSubscriptionInfo(null);
-    setStep("create-customer");
+    setPaymentIntent(null);
+    setPaymentStatus("idle");
   };
 
   return (
     <div
-      data-testid="app"
-      className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4"
+      className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center 
+  justify-center p-4"
     >
       <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full">
         <h1 className="text-2xl font-bold text-gray-800 mb-2 text-center">
-          Subscription Airwallex
+          Paiement Airwallex
         </h1>
         <p className="text-gray-600 mb-8 text-center">
-          Abonnement mensuel de 20 EUR
+          Test de paiement de 5 EUR
         </p>
 
-        {/* Debug info */}
-        <div className="mb-4 p-2 bg-gray-100 text-xs rounded">
-          <div>Step: {step}</div>
-          <div>Customer ID: {customerId}</div>
-          <div>Payment Intent ID: {paymentIntentId}</div>
-          <div>Loading: {loading.toString()}</div>
-        </div>
-
-        {step === "create-customer" && (
+        {paymentStatus === "idle" && !paymentIntent && (
           <div className="text-center">
             <h2 className="text-lg font-semibold mb-4">
-              Étape 1: Créer votre compte
+              Créer un paiement de 5€
             </h2>
             <button
-              onClick={createCustomer}
+              onClick={createPaymentIntent}
               disabled={loading}
               className={`
-                w-full py-4 px-6 rounded-lg font-semibold text-white transition-all duration-200 
-                ${
-                  loading
-                    ? "bg-gray-400 cursor-not-allowed"
-                    : "bg-blue-600 hover:bg-blue-700 hover:shadow-lg transform hover:scale-105"
-                }
-              `}
+                  w-full py-4 px-6 rounded-lg font-semibold text-white transition-all duration-200 
+                  ${
+                    loading
+                      ? "bg-gray-400 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700 hover:shadow-lg transform hover:scale-105"
+                  }
+                `}
             >
               {loading ? (
                 <div className="flex items-center justify-center space-x-2">
@@ -228,47 +144,53 @@ function App() {
                   <span>Création en cours...</span>
                 </div>
               ) : (
-                "Créer mon compte"
+                "Créer le paiement"
               )}
             </button>
           </div>
         )}
 
-        {step === "add-payment" && (
+        {paymentIntent && paymentStatus === "idle" && (
           <div>
             <h2 className="text-lg font-semibold mb-4 text-center">
-              Étape 2: Premier paiement (20 EUR)
+              Payer 5 EUR
             </h2>
-            <div className="text-center">
-              <p className="text-sm text-gray-600 mb-4">
-                Vous allez être redirigé vers la page sécurisée Airwallex pour
-                effectuer votre premier paiement de 20 EUR. L'abonnement sera
-                automatiquement activé après le paiement.
+            <div className="bg-gray-50 rounded-lg p-4 mb-4">
+              <p className="text-sm text-gray-600">
+                <strong>Payment Intent ID:</strong> {paymentIntent.id}
               </p>
-              <button
-                onClick={handlePaymentMethodRedirect}
-                disabled={!payments || loading || !paymentIntentId}
-                className={`
+              <p className="text-sm text-gray-600">
+                <strong>Montant:</strong> 5 EUR
+              </p>
+              <p className="text-sm text-gray-600">
+                <strong>Status:</strong> {paymentIntent.status}
+              </p>
+            </div>
+            <p className="text-sm text-gray-600 mb-4 text-center">
+              Vous allez être redirigé vers la page sécurisée Airwallex pour
+              payer par carte ou virement SEPA (TrueLayer).
+            </p>
+            <button
+              onClick={redirectToCheckout}
+              disabled={!payments || loading}
+              className={`
                   w-full py-3 px-6 rounded-lg font-semibold text-white transition-all duration-200
                   ${
-                    !payments || loading || !paymentIntentId
+                    !payments || loading
                       ? "bg-gray-400 cursor-not-allowed"
                       : "bg-blue-600 hover:bg-blue-700"
                   }
                 `}
-              >
-                {!paymentIntentId
-                  ? "Préparation..."
-                  : "Payer 20 EUR et s'abonner"}
-              </button>
-            </div>
-            <p className="text-sm text-gray-600 text-center mt-4">
+            >
+              Procéder au paiement
+            </button>
+            <p className="text-sm text-gray-500 text-center mt-4">
               Paiement sécurisé par Airwallex
             </p>
           </div>
         )}
 
-        {step === "completed" && (
+        {paymentStatus === "success" && (
           <div className="text-center">
             <div className="mb-6">
               <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
@@ -287,72 +209,64 @@ function App() {
                 </svg>
               </div>
               <h2 className="text-xl font-bold text-green-800 mb-2">
-                🎉 Abonnement activé !
+                Paiement réussi !
               </h2>
               <p className="text-gray-600 mb-4">
-                {subscriptionInfo?.message ||
-                  "Votre abonnement mensuel de 20 EUR a été créé avec succès."}
+                Votre paiement de 5 EUR a été effectué avec succès.
               </p>
-
-              {subscriptionInfo && (
-                <div className="bg-gray-50 rounded-lg p-4 mb-4 text-left">
-                  <h3 className="font-semibold mb-2">
-                    Détails de l'abonnement :
-                  </h3>
-                  <p className="text-sm text-gray-600">
-                    <strong>Customer ID:</strong> {subscriptionInfo.customer_id}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <strong>Subscription ID:</strong>{" "}
-                    {subscriptionInfo.subscription?.id}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <strong>Statut:</strong>{" "}
-                    {subscriptionInfo.subscription?.status}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    <strong>Prochain paiement:</strong>{" "}
-                    {subscriptionInfo.subscription?.next_billing_at}
-                  </p>
-                </div>
-              )}
             </div>
-
             <button
               onClick={resetFlow}
               className="w-full py-3 px-6 rounded-lg font-semibold text-blue-600 border-2 border-blue-600 hover:bg-blue-50 transition-all duration-200"
             >
-              Créer un nouvel abonnement
+              Faire un nouveau paiement
             </button>
           </div>
         )}
 
-        {/* Indicateur de chargement global */}
+        {paymentStatus === "failed" && (
+          <div className="text-center">
+            <div className="mb-6">
+              <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg
+                  className="w-8 h-8 text-red-500"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M6 18L18 6M6 6l12 12"
+                  />
+                </svg>
+              </div>
+              <h2 className="text-xl font-bold text-red-800 mb-2">
+                Paiement échoué
+              </h2>
+              <p className="text-gray-600 mb-4">
+                Le paiement n'a pas pu être effectué. Veuillez réessayer.
+              </p>
+            </div>
+            <button
+              onClick={resetFlow}
+              className="w-full py-3 px-6 rounded-lg font-semibold text-blue-600 border-2 border-blue-600 hover:bg-blue-50 transition-all duration-200"
+            >
+              Réessayer
+            </button>
+          </div>
+        )}
+
         {loading && (
           <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div className="bg-white rounded-lg p-6 text-center">
               <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-              <p className="text-gray-800 font-semibold">
-                {step === "add-payment"
-                  ? "Finalisation de l'abonnement..."
-                  : "Traitement..."}
-              </p>
+              <p className="text-gray-800 font-semibold">Traitement...</p>
               <p className="text-gray-600 text-sm">Veuillez patienter</p>
             </div>
           </div>
         )}
-
-        <div className="mt-8 flex justify-center space-x-2">
-          <div
-            className={`w-3 h-3 rounded-full ${step === "create-customer" ? "bg-blue-600" : "bg-gray-300"}`}
-          ></div>
-          <div
-            className={`w-3 h-3 rounded-full ${step === "add-payment" ? "bg-blue-600" : "bg-gray-300"}`}
-          ></div>
-          <div
-            className={`w-3 h-3 rounded-full ${step === "completed" ? "bg-green-600" : "bg-gray-300"}`}
-          ></div>
-        </div>
       </div>
     </div>
   );
